@@ -8,33 +8,26 @@ var util = require('../lib/util');
 describe('userSvc', function(){
   var initialUsers = [
     {
-      username: 'james',
-      password: 'secure',
-      active: false,
+      username: 'james', password: 'secure', active: false,
       _update: {
         password: 'simple',
         active: true
       }
     },
     {
-      username: 'bob',
-      password: 'secure',
-      admin: true,
+      username: 'bob',   password: 'secure', admin: true,
       _update: {
         admin: false
       }
     },
     {
-      username: 'jack',
-      password: 'secure',
-      admin: true,
+      username: 'jack',  password: 'secure', admin: true,
       _update: {
         active: false
       }
     },
     {
-      username: 'john',
-      password: 'secure',
+      username: 'john',  password: 'secure',
       _update: {
         password: 'classified',
         admin: true
@@ -46,7 +39,7 @@ describe('userSvc', function(){
     async.series([
       userSvc.clear,
       function(cb) {
-        async.each(initialUsers, userSvc.create, cb);
+        async.eachSeries(initialUsers, userSvc.create, cb);
       }
     ], done);
   });
@@ -169,7 +162,7 @@ describe('userSvc', function(){
           should.not.exists(err);
           userSvc.loginInfo(user.username, function(err, row){
             should.not.exists(err);
-            should(row).is.an.Object;
+            should(row).be.ok.and.is.an.Object;
             should(row.last).be.ok;
             should(Date.parse(row.last)).approximately(Date.now(), 20000); // 20'
             cb();
@@ -189,7 +182,7 @@ describe('userSvc', function(){
           should.not.exists(err);
           userSvc.loginInfo(user.username, function(err, row){
             should.not.exists(err);
-            should(row).is.an.Object;
+            should(row).be.ok.and.is.an.Object;
             should(row.last).be.ok;
             should(Date.parse(row.last)).approximately(Date.now(), 20000); // 20'
             cb();

@@ -39,7 +39,7 @@ var listAll = exports.all = function(admin, active, callback) {
   db.all(sql, function(err, rows){
     if (err) {
       log.warn('fail to fetch users: %j', err);
-      callback('fail to fetch users');
+      callback(new Error('fail to fetch users'));
     } else {
       log.info('%d users fetched!', rows ? rows.length : 0);
       callback(null, rows);
@@ -57,13 +57,13 @@ var listActives = exports.actives = function(callback) {
 
 var create = exports.create = function(user, callback) {
   if (!user.username || !user.password) {
-    callback("username & password must be provided");
+    callback(new Error("username & password must be provided"));
     return;
   }
 
   async.series([
     function(cb){
-      exports.getByName(user.username, function(err, user){
+      getByName(user.username, function(err, user){
         if (err) {
           cb(err);
         } else if (user) {
@@ -82,7 +82,7 @@ var create = exports.create = function(user, callback) {
         function(err){
           if (err) {
             log.warn('fail to create user: %j', err);
-            cb('fail to create user');
+            cb(new Error('fail to create user'));
           } else {
             log.info('user [%s] created!', user.username);
             cb();
@@ -97,7 +97,7 @@ var getByName = exports.getByName = function(username, callback) {
   db.get('SELECT * FROM user WHERE username=?', username, function(err, row){
     if (err) {
       log.warn('fail to get user record: %j', err);
-      callback('database not connected or table [user] not exists');
+      callback(new Error('database not connected or table [user] not exists'));
     } else if (row){
       callback(null, row);
     } else {
@@ -122,7 +122,7 @@ exports.update = function(user, callback){
   db.exec(sql, function(err){
     if (err) {
       log.warn('fail to update user[%s]: %j', user.username, err);
-      callback('fail to update user');
+      callback(new Error('fail to update user'));
     } else {
       log.info('user [%s] updated', user.username);
       callback();
@@ -134,7 +134,7 @@ var removeByName = exports.removeByName = function(username, callback) {
   db.run('DELETE FROM user WHERE username=?', username, function(err){
     if (err) {
       log.warn('fail to remove %s: %j', username, err);
-      callback('fail to remove ' + username);
+      callback(new Error('fail to remove ' + username));
     } else {
       log.info('user [%s] removed!', username);
       callback();
@@ -143,16 +143,16 @@ var removeByName = exports.removeByName = function(username, callback) {
 };
 
 var sqlClear = multiline(function(){/*
-  BEGIN;
+ -- BEGIN;
     DELETE FROM login;
     DELETE FROM user;
-  COMMIT;
+ -- COMMIT;
 */});
 exports.clear = function(callback) {
   db.exec(sqlClear, function(err){
     if (err) {
-      log.warn('fail to clear records of table[user & login]: %j', err);
-      callback('failed');
+      log.warn('fail to clear users & logins: %j', err);
+      callback(new Error('fail to clear users & logins'));
     } else {
       log.info('ALL users & logins cleared!');
       callback();
@@ -171,7 +171,7 @@ var auth = exports.auth = function(username, password, callback) {
         cb(null, user);
       } else {
         log.warn('fail to auth %s/%s', username, password);
-        cb('fail to auth');
+        cb(new Error('fail to auth'));
       }
     }
   ], callback);
@@ -188,7 +188,7 @@ var authAsAdmin = exports.authAsAdmin = function(username, password, callback) {
         cb(null, user);
       } else {
         log.warn('%s is not admin', username);
-        cb('fail to auth as admin');
+        cb(new Error('fail to auth as admin'));
       }
     }
   ], callback);
@@ -198,7 +198,7 @@ function addLoginLog(user, callback) {
   db.run("UPDATE login SET times=times+1, last=datetime('now','localtime') WHERE username=?", user.username, function(err){
     if (err) {
       log.warn('fail to update login record of %s: %j', user.username, err);
-      callback('fail to update login record');
+      callback(new Error('fail to update login record'));
     } else {
       if (this.changes) {
         callback();
@@ -206,7 +206,7 @@ function addLoginLog(user, callback) {
         db.run("INSERT INTO login (username, last) VALUES (?, datetime('now','localtime'))", user.username, function(err) {
           if (err) {
             log.warn('fail to insert login record of %s: %j', user.username, err);
-            callback('fail to insert login record');
+            callback(new Error('fail to insert login record'));
           } else {
             log.info('login [%s] recorded!', user.username);
             callback();
@@ -239,7 +239,7 @@ exports.loginInfo = function(username, callback) {
   db.get('SELECT * FROM login WHERE username=?', username, function(err, row){
     if (err) {
       log.warn('fail to fetch login record of %s: %j', username, err);
-      callback('fail to fetch login record');
+      callback(new Error('fail to fetch login record'));
     } else {
       callback(null, row);
     }
