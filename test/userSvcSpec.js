@@ -1,39 +1,41 @@
 /*global describe, it, beforeEach, afterEach*/
 var should = require('should');
 var async = require('async');
+
+var util = require('../lib/util');
+var db = require('../lib/db');
+//var dbOptions = require('../conf/db-sqlite-test');
+var dbOptions = require('../conf/db-mysql');
+//var dbOptions = require('../conf/db-mariadb');
+
 // ! Test Target !
 var userSvc = require('../services/userSvc');
-var util = require('../lib/util');
 
 describe('userSvc', function(){
   var initialUsers = [
     {
       username: 'james', password: 'secure', active: false,
-      _update: {
-        password: 'simple',
-        active: true
-      }
+
+      _update: { password: 'simple', active: true }
     },
     {
       username: 'bob',   password: 'secure', admin: true,
-      _update: {
-        admin: false
-      }
+
+      _update: { admin: false }
     },
     {
       username: 'jack',  password: 'secure', admin: true,
-      _update: {
-        active: false
-      }
+
+      _update: { active: false }
     },
     {
       username: 'john',  password: 'secure',
-      _update: {
-        password: 'classified',
-        admin: true
-      }
+
+      _update: { password: 'classified', admin: true }
     }
   ];
+
+  before(db.init.bind(null, dbOptions));
 
   beforeEach(function(done){
     async.series([
@@ -48,7 +50,7 @@ describe('userSvc', function(){
     userSvc.all(function(err, users){
       should.not.exists(err);
       should(users).is.an.Array;
-      should(users.length).be.above(initialUsers.length - 1);
+      should(users.length).eql(initialUsers.length);
       done();
     });
   });
@@ -59,10 +61,16 @@ describe('userSvc', function(){
         should.not.exists(err);
         should(users).is.an.Array;
 
-        var expectedCount = initialUsers.filter(function(user){
-          return user.admin && (active === null || user.active == active);
-        }).length;
-        should(users.length).be.above(expectedCount - 1);
+        var expected = [];
+        initialUsers.forEach(function(user){
+          if (user.admin && (active === null || (user.active !== false) == active)) {
+            expected.push(user.username);
+          }
+        });
+        should(users.length).eql(expected.length);
+        should(users.map(function(user){
+          return user.username;
+        }).sort()).eql(expected.sort());
 
         cb();
       });
@@ -74,10 +82,16 @@ describe('userSvc', function(){
       should.not.exists(err);
       should(users).is.an.Array;
 
-      var expectedCount = initialUsers.filter(function(user){
-        return user.active;
-      }).length;
-      should(users.length).be.above(expectedCount - 1);
+      var expected = [];
+      initialUsers.forEach(function(user){
+        if (user.active !== false) {
+          expected.push(user.username);
+        }
+      });
+      should(users.length).eql(expected.length);
+      should(users.map(function(user){
+        return user.username;
+      }).sort()).eql(expected.sort());
 
       done();
     });
@@ -118,17 +132,17 @@ describe('userSvc', function(){
 
       userSvc.update(up, function(err){
         should.not.exists(err);
-        userSvc.getByName(user.username, function(err, user){
+        userSvc.getByName(user.username, function(err, updated){
           should.not.exists(err);
-          should(user).is.an.Object;
+          should(updated).is.an.Object;
           if (util.isPresent(up.password)) {
-            should(user.password).equal(util.sha1Sum(up.password));
+            should(updated.password).equal(util.sha1Sum(up.password));
           }
           if (util.isPresent(up.admin)) {
-            should(user.admin).equal(util.bool2int(up.admin));
+            should(updated.admin).equal(up.admin);
           }
           if (util.isPresent(up.active)) {
-            should(user.active).equal(util.bool2int(up.active));
+            should(updated.active).equal(up.active);
           }
 
           cb();
@@ -154,17 +168,18 @@ describe('userSvc', function(){
 
   it('can login', function(done){
     async.each(initialUsers, function(user, cb){
-      userSvc.login(user.username, user.password, function(err){
+      userSvc.login(user.username, user.password, function(err, auth){
         if (user.active === false) {
           should(err).be.ok;
           cb();
         } else {
           should.not.exists(err);
-          userSvc.loginInfo(user.username, function(err, row){
+          should(auth).have.properties('token', 'tokenExpire');
+          should(auth.token).be.ok;
+          userSvc.latestAuth(user.username, true, function(err, authFetched){
             should.not.exists(err);
-            should(row).be.ok.and.is.an.Object;
-            should(row.last).be.ok;
-            should(Date.parse(row.last)).approximately(Date.now(), 20000); // 20'
+            should(authFetched).is.an.Object;
+            should(authFetched.values).eql(auth.values);
             cb();
           });
         }
@@ -174,21 +189,30 @@ describe('userSvc', function(){
 
   it('can login as admin', function(done){
     async.each(initialUsers, function(user, cb){
-      userSvc.loginAsAdmin(user.username, user.password, function(err){
+      userSvc.login(user.username, user.password, true, function(err, auth){
         if (user.active === false || !user.admin) {
           should(err).be.ok;
           cb();
         } else {
           should.not.exists(err);
-          userSvc.loginInfo(user.username, function(err, row){
+          should(auth).have.properties('token', 'tokenExpire');
+          should(auth.token).be.ok;
+          userSvc.latestAuth(user.username, function(err, authFetched){
             should.not.exists(err);
-            should(row).be.ok.and.is.an.Object;
-            should(row.last).be.ok;
-            should(Date.parse(row.last)).approximately(Date.now(), 20000); // 20'
+            should(authFetched).is.an.Object;
+            should(authFetched.values).eql(auth.values);
             cb();
           });
         }
       });
     }, done);
+  });
+
+  it('can auth with token (gotten at last success auth)', function(){
+
+  });
+
+  it('can auth by OAuth', function(){
+
   });
 });

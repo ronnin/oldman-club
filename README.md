@@ -1,7 +1,15 @@
-oldman-club
-===============
+# oldman-club
 
 Registry service for SeaJs modules
+
+# runtime enviroment options
+- OM_PORT
+- OM_INV_ROOT
+- OM_UPSTREAM
+- OM_DB_OPTION
+- OM_AUTH_DURATION
+- OM_LOG_LEVEL
+- OM_LOG_FILE
 
 ## License
 

@@ -10,45 +10,47 @@
   "bugs": {
     "url": "https://github.com/ronnin/oldman-club/issues"
   },
-  "author": "Ronnin Lee <ronnin.lee@gmail.com>",
+  "author": {
+    "name": "Ronnin Lee",
+    "email": "ronnin@outlook.com"
+  },
   "engines": {
     "node": ">=0.10.0"
   },
   "dependencies": {
     "async": "^0.2.10",
+    "bytes": "^0.3.0",
+    "chalk": "^0.4.0",
+    "everyauth": "^0.4.5",
     "express": "^3.5.1",
-    "gulp": "^3.5.6",
-    "gulp-bundle": "^0.2.3",
-    "gulp-connect": "^1.0.10",
-    "gulp-imagemin": "^0.1.5",
-    "gulp-jshint": "^1.4.2",
-    "gulp-load-plugins": "^0.3.0",
-    "gulp-size": "^0.1.3",
-    "gulp-useref": "^0.1.2",
     "jade": "^1.3.0",
     "lodash": "^2.4.1",
+    "mariasql": "^0.1.20",
     "mkdirp": "^0.3.5",
-    "multiline": "^0.2.0",
+    "moment": "^2.6.0",
+    "mysql": "^2.2.0",
+    "querystring": "^0.2.0",
     "semver": "^2.2.1",
+    "sequelize": "^2.0.0-dev11",
     "sqlite3": "^2.2.3",
     "string": "^1.8.1",
-    "winston": "^0.7.2",
-    "wiredep": "^1.1.1"
+    "superagent": "^0.18.0",
+    "winston": "^0.7.2"
   },
   "devDependencies": {
-    "gulp": "~3.5.0",
+    "gulp": "~3.5.6",
     "gulp-load-plugins": "~0.3.0",
     "gulp-util": "~2.2.9",
     "gulp-autoprefixer": "~0.0.6",
-    "gulp-jshint": "~1.4.0",
-    "gulp-imagemin": "~0.1.4",
+    "gulp-jshint": "~1.4.2",
+    "gulp-imagemin": "~0.1.5",
     "gulp-clean": "~0.2.4",
     "gulp-cache": "~0.1.1",
-    "gulp-size": "~0.1.2",
-    "gulp-connect": "~1.0.0",
+    "gulp-size": "~0.1.3",
+    "gulp-connect": "~1.0.10",
     "gulp-useref": "~0.1.2",
-    "gulp-bundle": "~0.2.0",
-    "wiredep": "~1.1.0"
+    "gulp-bundle": "~0.2.3",
+    "wiredep": "~1.1.1"
   },
   "keywords": [
     "oldman",

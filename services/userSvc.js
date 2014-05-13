@@ -1,25 +1,12 @@
 var async = require('async');
-var multiline = require('multiline');
+var QueryChainer = require('sequelize').Utils.QueryChainer;
+var _ = require('lodash');
+var moment = require('moment');
 
 var log = require('../lib/logger');
 var util = require('../lib/util');
-
-var ddl = multiline(function(){/*
-  CREATE TABLE IF NOT EXISTS user (
-    username varchar(50) NOT NULL PRIMARY KEY,
-    password text        NOT NULL,
-    admin    boolean     DEFAULT 0,
-    active   boolean     DEFAULT 1
-  );
-  CREATE TABLE IF NOT EXISTS login (
-    username varchar(50) NOT NULL,
-    last     datetime,
-    times    int         DEFAULT 1,
-    CONSTRAINT fk_login_user FOREIGN KEY (username) REFERENCES user(username)
-  );
-*/});
-
-var db = require('../lib/db')(ddl);
+var db = require('../lib/db');
+var conf = require('../conf');
 
 var listAll = exports.all = function(admin, active, callback) {
   var args = util.fillOptionalArgs(arguments, 3);
@@ -27,33 +14,28 @@ var listAll = exports.all = function(admin, active, callback) {
   active = args[1];
   callback = args[2] || function(){};
 
-  var sql = 'SELECT * FROM user WHERE 1=1';
+  var qOpt = { where: {}, order: 'username' };
   if (util.isPresent(admin)) {
-    sql += ' AND admin=' + util.bool2int(admin);
+    qOpt.where.admin = admin;
   }
   if (util.isPresent(active)) {
-    sql += ' AND active=' + util.bool2int(active);
+    qOpt.where.active = active;
   }
-  sql += ' ORDER BY username';
 
-  db.all(sql, function(err, rows){
+  db.model('User').findAll(qOpt).complete(function(err, users) {
     if (err) {
       log.warn('fail to fetch users: %j', err);
       callback(new Error('fail to fetch users'));
     } else {
-      log.info('%d users fetched!', rows ? rows.length : 0);
-      callback(null, rows);
+      log.info('%d users fetched!', users ? users.length : 0);
+      callback(null, users);
     }
   });
 };
 
-var listAdmins = exports.admins = function(active, callback) {
-  listAll(true, active, callback);
-};
+var listAdmins = exports.admins = listAll.bind(null, true);
 
-var listActives = exports.actives = function(callback) {
-  listAll(null, true, callback);
-};
+var listActives = exports.actives = listAll.bind(null, null, true);
 
 var create = exports.create = function(user, callback) {
   if (!user.username || !user.password) {
@@ -76,10 +58,9 @@ var create = exports.create = function(user, callback) {
       });
     },
     function(cb){
-      db.run('INSERT INTO user (username, password, admin, active) VALUES (?,?,?,?)',
-        user.username, util.sha1Sum(user.password),
-        util.bool2int(user.admin), util.bool2int(user.active !== false),
-        function(err){
+      db.model('User').build(_.defaults({password: util.sha1Sum(user.password)}, user))
+        .save()
+        .complete(function(err){
           if (err) {
             log.warn('fail to create user: %j', err);
             cb(new Error('fail to create user'));
@@ -94,32 +75,22 @@ var create = exports.create = function(user, callback) {
 };
 
 var getByName = exports.getByName = function(username, callback) {
-  db.get('SELECT * FROM user WHERE username=?', username, function(err, row){
+  db.model('User').find({where: {username: username}}).complete(function(err, user){
     if (err) {
       log.warn('fail to get user record: %j', err);
       callback(new Error('database not connected or table [user] not exists'));
-    } else if (row){
-      callback(null, row);
     } else {
-      callback();
+      callback(null, user);
     }
   });
 };
 
 exports.update = function(user, callback){
-  var sql = 'UPDATE user SET username=username';
-  if (util.isPresent(user.password)) {
-    sql += ",password='" + util.sha1Sum(user.password) + "'";
-  }
-  if (util.isPresent(user.admin)) {
-    sql += ',admin=' + util.bool2int(user.admin);
-  }
-  if (util.isPresent(user.active)) {
-    sql += ',active=' + util.bool2int(user.active);
-  }
-  sql += " WHERE username='" + user.username + "'";
-
-  db.exec(sql, function(err){
+  var updated = user.password ? _.defaults({password: util.sha1Sum(user.password)}, user) : user;
+  var where = user.id ? {id: user.id} : {username: user.username};
+  db.model('User')
+    .update(updated, where)
+    .complete(function(err){
     if (err) {
       log.warn('fail to update user[%s]: %j', user.username, err);
       callback(new Error('fail to update user'));
@@ -131,7 +102,7 @@ exports.update = function(user, callback){
 };
 
 var removeByName = exports.removeByName = function(username, callback) {
-  db.run('DELETE FROM user WHERE username=?', username, function(err){
+  db.model('User').destroy({username: username}).complete(function(err){
     if (err) {
       log.warn('fail to remove %s: %j', username, err);
       callback(new Error('fail to remove ' + username));
@@ -142,14 +113,14 @@ var removeByName = exports.removeByName = function(username, callback) {
   });
 };
 
-var sqlClear = multiline(function(){/*
- -- BEGIN;
-    DELETE FROM login;
-    DELETE FROM user;
- -- COMMIT;
-*/});
 exports.clear = function(callback) {
-  db.exec(sqlClear, function(err){
+  var qChain = new QueryChainer;
+
+  ['Auth', 'User'].forEach(function(modelName){
+    qChain.add(db.model(modelName).destroy());
+  });
+
+  qChain.run().complete(function(err){
     if (err) {
       log.warn('fail to clear users & logins: %j', err);
       callback(new Error('fail to clear users & logins'));
@@ -160,88 +131,123 @@ exports.clear = function(callback) {
   });
 };
 
-var auth = exports.auth = function(username, password, callback) {
-  async.waterfall([
-    function(cb){
-      getByName(username, cb);
-    },
-    function(user, cb) {
-      if (user != null && user.active && user.password == util.sha1Sum(password)) {
-        log.info('user [%s] authorized!', username);
-        cb(null, user);
-      } else {
-        log.warn('fail to auth %s/%s', username, password);
-        cb(new Error('fail to auth'));
-      }
-    }
-  ], callback);
-};
-
-var authAsAdmin = exports.authAsAdmin = function(username, password, callback) {
-  async.waterfall([
-    function(cb) {
-      auth(username, password, cb);
-    },
-    function(user, cb) {
-      if (user.admin) {
-        log.info('user [%s] authorized as admin!', username);
-        cb(null, user);
-      } else {
-        log.warn('%s is not admin', username);
-        cb(new Error('fail to auth as admin'));
-      }
-    }
-  ], callback);
-};
-
-function addLoginLog(user, callback) {
-  db.run("UPDATE login SET times=times+1, last=datetime('now','localtime') WHERE username=?", user.username, function(err){
+function saveAuth(auth, callback) {
+  auth.setDataValue('tokenExpire', util.noMilliseconds(auth.tokenExpire));
+  auth.save().complete(function(err){
     if (err) {
-      log.warn('fail to update login record of %s: %j', user.username, err);
+      log.warn('fail to update auth record of %s: %j', auth.getUser().username, err);
       callback(new Error('fail to update login record'));
     } else {
-      if (this.changes) {
-        callback();
-      } else {
-        db.run("INSERT INTO login (username, last) VALUES (?, datetime('now','localtime'))", user.username, function(err) {
-          if (err) {
-            log.warn('fail to insert login record of %s: %j', user.username, err);
-            callback(new Error('fail to insert login record'));
-          } else {
-            log.info('login [%s] recorded!', user.username);
-            callback();
-          }
-        });
-      }
+      log.info('auth [Id:%d] saved!', auth.UserId);
+      callback(null, auth);
     }
   });
 }
 
-exports.login = function(username, password, callback) {
+exports.login = function(username, password, admin, callback) {
+  if (typeof admin == 'function') {
+    callback = admin;
+    admin = null;
+  }
+
+  if (typeof admin == 'function') {
+    callback = admin;
+    admin = null;
+  }
+
   async.waterfall([
-    function(cb) {
-      auth(username, password, cb);
+    getByName.bind(null, username),
+    function(user, cb) {
+      if (user == null || !user.active || (admin && !user.admin) || user.password !== util.sha1Sum(password)) {
+        log.warn('fail to auth %s/%s', username, password);
+        cb(new Error('fail to auth'));
+      } else {
+        log.info('user [%s] authorized!', username);
+        var now = Date.now();
+        user.createAuth({
+          token: util.sha1Sum([user.username, now].join('-')),
+          tokenExpire: moment().add(conf.authDuration[0], conf.authDuration[1]).toDate()
+        }).complete(function(err, auth){
+          if (err) {
+            log.warn('fail to create auth [user: %s]: %j', username, err);
+            cb(new Error('fail to create auth'));
+          } else {
+            cb(null, auth);
+          }
+        });
+      }
     },
-    addLoginLog
+    saveAuth
   ], callback);
 };
 
-exports.loginAsAdmin = function(username, password, callback) {
-  async.waterfall([
-    function(cb) {
-      authAsAdmin(username, password, cb);
-    },
-    addLoginLog
-  ], callback);
+exports.oAuth = function(authId, callback) {
+  callback();
 };
 
-exports.loginInfo = function(username, callback) {
-  db.get('SELECT * FROM login WHERE username=?', username, function(err, row){
-    if (err) {
-      log.warn('fail to fetch login record of %s: %j', username, err);
-      callback(new Error('fail to fetch login record'));
-    } else {
-      callback(null, row);
+exports.tokenAuth = function(token, callback) {
+  //db.model('Auth').find({where})
+};
+
+exports.latestAuth = function(username, valid, callback) {
+  if (typeof valid == 'function') {
+    callback = valid;
+    valid = null;
+  }
+
+  async.waterfall([
+    getByName.bind(null, username),
+    function(user, cb){
+      if (!user) {
+        log.warn('fetch auths, but user [%s] not present', username);
+        cb(new Error('fail to fetch auths'));
+      } else {
+        user.getAuths({order: 'tokenExpire DESC', limit: 1}).complete(function(err, auths){
+          if (err) {
+            log.warn('fail to fetch auths of user [%s]: %j', username, err);
+            return cb(new Error('fail to fetch auths'));
+          }
+
+          var auth = auths && auths[0];
+          if (!auth) {
+            log.warn('%s not authorized ever!', username);
+            return cb();
+          }
+          if (!valid) {
+            return cb(null, auth);
+          }
+
+          var expire = auth.tokenExpire && moment(auth.tokenExpire);
+          if (expire && expire.isValid() && expire.isAfter(moment())) {
+            cb(null, auth);
+          } else {
+            log.warn('authorization for %s was expired!', username);
+            cb();
+          }
+        });
+      }
     }
-  });
+  ], callback);
+};
+
+exports.auths = function(username, callback) {
+  async.waterfall([
+    getByName.bind(null, username),
+    function(user, cb){
+      if (!user) {
+        log.warn('fetch auths, but user [%s] not present', username);
+        cb(new Error('fail to fetch auths'));
+      } else {
+        user.getAuths({order: ['tokenExpire', 'DESC']}).complete(function(err, auths){
+          if (err) {
+            log.warn('fail to fetch auths of user [%s]: %j', username, err);
+            cb(new Error('fail to fetch auths'));
+          } else {
+            log.info('%d auths of user [%s] fetched!', auths ? auths.length : 0);
+            cb(null, auths);
+          }
+        });
+      }
+    }
+  ], callback);
 };
