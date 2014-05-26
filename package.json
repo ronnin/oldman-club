@@ -50,6 +50,7 @@
     "gulp-connect": "~1.0.10",
     "gulp-useref": "~0.1.2",
     "gulp-bundle": "~0.2.3",
+    "should": "^3.3.1",
     "wiredep": "~1.1.1"
   },
   "keywords": [

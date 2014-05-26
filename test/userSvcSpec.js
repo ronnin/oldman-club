@@ -3,10 +3,8 @@ var should = require('should');
 var async = require('async');
 
 var util = require('../lib/util');
-var db = require('../lib/db');
-//var dbOptions = require('../conf/db-sqlite-test');
-var dbOptions = require('../conf/db-mysql');
-//var dbOptions = require('../conf/db-mariadb');
+
+var env = require('./env');
 
 // ! Test Target !
 var userSvc = require('../services/userSvc');
@@ -15,41 +13,35 @@ describe('userSvc', function(){
   var initialUsers = [
     {
       username: 'james', password: 'secure', active: false,
-
       _update: { password: 'simple', active: true }
     },
     {
       username: 'bob',   password: 'secure', admin: true,
-
       _update: { admin: false }
     },
     {
       username: 'jack',  password: 'secure', admin: true,
-
       _update: { active: false }
     },
     {
       username: 'john',  password: 'secure',
-
       _update: { password: 'classified', admin: true }
     }
   ];
 
-  before(db.init.bind(null, dbOptions));
+  before(env.init);
 
   beforeEach(function(done){
     async.series([
       userSvc.clear,
-      function(cb) {
-        async.eachSeries(initialUsers, userSvc.create, cb);
-      }
+      async.eachSeries.bind(null, initialUsers, userSvc.create)
     ], done);
   });
 
   it('can fetch all users', function(done){
     userSvc.all(function(err, users){
       should.not.exists(err);
-      should(users).is.an.Array;
+      should(users).be.an.Array;
       should(users.length).eql(initialUsers.length);
       done();
     });
@@ -59,7 +51,7 @@ describe('userSvc', function(){
     async.each([null, true, false], function(active, cb) {
       userSvc.admins(active, function(err, users) {
         should.not.exists(err);
-        should(users).is.an.Array;
+        should(users).be.an.Array;
 
         var expected = [];
         initialUsers.forEach(function(user){
@@ -80,7 +72,7 @@ describe('userSvc', function(){
   it('can fetch conditional users(active)', function(done) {
     userSvc.actives(function(err, users) {
       should.not.exists(err);
-      should(users).is.an.Array;
+      should(users).be.an.Array;
 
       var expected = [];
       initialUsers.forEach(function(user){
@@ -101,7 +93,7 @@ describe('userSvc', function(){
     async.each(initialUsers, function(user, cb){
       userSvc.getByName(user.username, function(err, rec){
         should.not.exists(err);
-        should(rec).is.an.Object;
+        should(rec).be.an.Object;
         should(rec.username).eql(user.username);
         cb();
       });
@@ -116,7 +108,7 @@ describe('userSvc', function(){
       should.not.exists(err);
       userSvc.getByName('ronnin', function(err, user) {
         should.not.exists(err);
-        should(user).is.an.Object;
+        should(user).be.an.Object;
         should(user.username).eql('ronnin');
 
         done();
@@ -134,7 +126,7 @@ describe('userSvc', function(){
         should.not.exists(err);
         userSvc.getByName(user.username, function(err, updated){
           should.not.exists(err);
-          should(updated).is.an.Object;
+          should(updated).be.an.Object;
           if (util.isPresent(up.password)) {
             should(updated.password).equal(util.sha1Sum(up.password));
           }
@@ -178,7 +170,7 @@ describe('userSvc', function(){
           should(auth.token).be.ok;
           userSvc.latestAuth(user.username, true, function(err, authFetched){
             should.not.exists(err);
-            should(authFetched).is.an.Object;
+            should(authFetched).be.an.Object;
             should(authFetched.values).eql(auth.values);
             cb();
           });
@@ -199,7 +191,7 @@ describe('userSvc', function(){
           should(auth.token).be.ok;
           userSvc.latestAuth(user.username, function(err, authFetched){
             should.not.exists(err);
-            should(authFetched).is.an.Object;
+            should(authFetched).be.an.Object;
             should(authFetched.values).eql(auth.values);
             cb();
           });

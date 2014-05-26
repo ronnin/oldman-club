@@ -2,13 +2,11 @@
 var should = require('should');
 var async = require('async');
 var _= require('lodash');
-var db = require('../lib/db');
-//var dbOptions = require('../conf/db-sqlite-test');
-var dbOptions = require('../conf/db-mysql');
-//var dbOptions = require('../conf/db-mariadb');
+
 var util = require('../lib/util');
 var userSvc = require('../services/userSvc');
 
+var env = require('./env');
 // ! Test Target !
 var moduleSvc = require('../services/moduleSvc');
 
@@ -50,21 +48,19 @@ describe('moduleSvc', function(){
   var initialModulesStat = {};
 
   before(function(done){
+    initialModules.forEach(function(mod){
+      var hash = util.hashOf(mod.family, mod.name);
+      var stat = initialModulesStat[hash] || {count : 0, versions: [], family: mod.family, name: mod.name};
+      stat.count += 1;
+      stat.latest = mod.version;
+      stat.versions.push(mod.version);
+      initialModulesStat[hash] = stat;
+    });
+
     async.series([
-      db.init.bind(null, dbOptions),
+      env.init,
       userSvc.clear,
-      async.eachSeries.bind(null, initialUsers, userSvc.create),
-      function(cb){
-        initialModules.forEach(function(module, index){
-          var hash = util.hashOf(module.family, module.name);
-          var stat = initialModulesStat[hash] || {count : 0, originIndexes: {}, family: module.family, name: module.name};
-          stat.count += 1;
-          stat.latest = module.version;
-          stat.originIndexes[module.version] = index;
-          initialModulesStat[hash] = stat;
-        });
-        cb();
-      }
+      async.eachSeries.bind(null, initialUsers, userSvc.create)
     ], done);
   });
 
@@ -73,7 +69,7 @@ describe('moduleSvc', function(){
   beforeEach(function(done){
     async.series([
       moduleSvc.clear,
-      async.eachSeries.bind(null, initialModules, moduleSvc.createVersion)
+      async.eachSeries.bind(null, initialModules, moduleSvc.createModuleWithVersion)
     ], done);
   });
 
@@ -81,32 +77,47 @@ describe('moduleSvc', function(){
   it('can fetch all modules', function(done){
     moduleSvc.modules(function(err, modules){
       should.not.exists(err);
-      should(modules).is.Array.and.have.length(Object.keys(initialModulesStat).length);
+      should(modules).be.an.Array;
+      should(modules.length).eql(Object.keys(initialModulesStat).length);
+
+      modules.forEach(function(mod){
+        should(mod).have.properties('family', 'name', 'latestVersion');
+        var f = mod.getDataValue('family'), n = mod.getDataValue('name');
+        should(f).be.ok;
+        should(n).be.ok;
+        should(mod.getDataValue('latestVersion')).have.properties('version');
+
+        var stat = initialModulesStat[util.hashOf(f, n)];
+        should(stat).be.ok.and.be.an.Object;
+        should(mod.getDataValue('latestVersion').getDataValue('version')).eql(stat.latest);
+      });
+
       done();
     });
   });
-  /*
+
   it('can fetch all modules with versions', function(done) {
     moduleSvc.modules({
-      inVersionDetail: true
-    }, function(err, mvs){
+      includeVersions: true
+    }, function(err, modules){
       should.not.exists(err);
-      should(mvs).is.Array.and.have.length(initialModules.length);
+      should(modules).be.an.Array;
+      should(modules.length).eql(Object.keys(initialModulesStat).length);
 
-      mvs.forEach(function(mv){
-        should(mv).have.properties('family', 'name', 'version', 'latest_version', 'version_count');
-        should(mv.family).be.ok;
-        should(mv.name).be.ok;
+      modules.forEach(function(mod){
+        should(mod).have.properties('family', 'name', 'versions', 'latestVersion');
+        var f = mod.getDataValue('family'), n = mod.getDataValue('name');
+        should(f).be.ok;
+        should(n).be.ok;
+        should(mod.getDataValue('latestVersion')).have.properties('version');
 
-        var stat = initialModulesStat[util.hashOf(mv.family, mv.name)];
-        should(stat).be.ok.and.is.an.Object;
-        should(mv.latest_version).equal(stat.latest);
-        should(mv.version_count).equal(stat.count);
+        var stat = initialModulesStat[util.hashOf(f, n)];
+        should(stat).be.ok.and.be.an.Object;
+        should(mod.getDataValue('latestVersion').getDataValue('version')).eql(stat.latest);
 
-        var originIndex = stat.originIndexes[mv.version];
-        var origin = initialModules[originIndex];
-        should(origin).have.properties('family', 'name', 'version');
-        should(mv.version).equal(origin.version);
+        should(mod.versions).be.an.Array.and.have.length(stat.count);
+        var vs = mod.versions.map(function(ver){ return ver.version });
+        should(vs.sort()).eql(stat.versions.sort());
       });
 
       done();
@@ -127,50 +138,35 @@ describe('moduleSvc', function(){
       name: ['%en%', /^.*en.*$/]
     }];
     async.each(patterns, function(pattern, cb){
-      var expectedMVs = initialModules.filter(function(module) {
-        return (!pattern.family || pattern.family[1].test(module.family))
-          && (!pattern.name || pattern.name[1].test(module.name));
-      });
       var hashOfModuleExpected = [];
-      var hashOfMVExpected = expectedMVs.map(function(mv){
-        var hash = util.hashOf(mv.family, mv.name);
-        if (hashOfModuleExpected.indexOf(hash) < 0) {
+      Object.keys(initialModulesStat).forEach(function(hash) {
+        var stat = initialModulesStat[hash];
+        if ( (!pattern.family || pattern.family[1].test(stat.family))
+          && (!pattern.name || pattern.name[1].test(stat.name)) ) {
           hashOfModuleExpected.push(hash);
         }
-
-        return util.hashOf(mv.family, mv.name, mv.version);
       });
       hashOfModuleExpected.sort();
-      hashOfMVExpected.sort();
 
-      async.each([true, false], function(inVersionDetail, cb1){
-        moduleSvc.modules({
-          family: pattern.family && pattern.family[0],
-          name: pattern.name && pattern.name[0],
-          inVersionDetail: inVersionDetail
-        }, function(err, rows) {
-          should.not.exists(err);
+      moduleSvc.modules({
+        family: pattern.family && pattern.family[0],
+        name: pattern.name && pattern.name[0]
+      }, function(err, rows) {
+        should.not.exists(err);
 
-          var expected = inVersionDetail ? hashOfMVExpected : hashOfModuleExpected;
-          should(rows).is.an.Array.and.have.length(expected.length);
-          var actual = rows.map(function(row){
-            should(row).have.properties('family', 'name');
-            should(row.family).be.ok;
-            should(row.name).be.ok;
-            if (inVersionDetail) {
-              should(row).have.properties('version');
-              should(row.version).be.ok;
-              return util.hashOf(row.family, row.name, row.version);
-            } else {
-              return util.hashOf(row.family, row.name);
-            }
-          });
-          actual.sort();
-          should(actual).eql(expected);
-
-          cb1();
+        should(rows).be.an.Array;
+        should(rows.length).eql(hashOfModuleExpected.length);
+        var actual = rows.map(function(row){
+          should(row).have.properties('family', 'name');
+          should(row.family).be.ok;
+          should(row.name).be.ok;
+          return util.hashOf(row.family, row.name);
         });
-      }, cb);
+        actual.sort();
+        should(actual).eql(hashOfModuleExpected);
+
+        cb();
+      });
     }, done);
   });
 
@@ -178,19 +174,17 @@ describe('moduleSvc', function(){
     async.each(Object.keys(initialModulesStat), function(h, callback) {
       var stat = initialModulesStat[h];
       async.waterfall([
-        function(cb){
-          moduleSvc.getModule(stat.family, stat.name, cb);
-        }, function(module, cb) {
-          should(module).have.properties('id');
-          should(module.id).be.ok;
-          moduleSvc.versionsOf(module.id, function(err, versions){
+        moduleSvc.getModule.bind(null, stat.family, stat.name),
+        function(mod, cb) {
+          should(mod).have.properties('id');
+          should(mod.id).be.ok;
+          moduleSvc.versionsOf(mod, function(err, versions){
             should.not.exists(err);
-            should(versions).is.an.Array;
-            var expectedVersions = Object.keys(stat.originIndexes).sort();
+            should(versions).be.an.Array;
             should(versions.map(function(ver){
               should(ver).have.properties('version');
               return ver.version;
-            }).sort()).eql(expectedVersions);
+            }).sort()).eql(stat.versions.sort());
 
             cb();
           });
@@ -201,49 +195,66 @@ describe('moduleSvc', function(){
 
   it('can create new version', function(done){
     var testData = [
-      { family: 'ronnin', name: 'util', author: 'ronnin', versions: ['0.0.1','0.0.2','0.0.3'] },
-      { family: 'popeye', name: 'rope', author: 'PopEye', versions: ['1.0.1','1.0.2','1.0.3'] },
+      { family: 'ronnin', name: 'util', versions: ['0.0.1','0.0.2','0.0.3'] },
+      { family: 'popeye', name: 'rope', versions: ['1.0.1','1.0.2','1.0.3'] },
       { family: 'any', name: 'thing', versions: ['1.0.1-alpha1','1.0.2-alpha1','1.0.3-alpha1'] }
     ];
 
-    async.each(testData, function(d, cb){
-      d._created = [];
-
-      async.eachSeries(d.versions, function(version, cb1){
-        moduleSvc.createVersion(_.extend({version: version}, d), function(err){
+    async.each(testData, function(d, callback){
+      async.eachSeries(d.versions, function(version, cb){
+        moduleSvc.createModuleWithVersion(_.extend({version: version}, d), function(err, mod){
           should.not.exists(err);
-          d._created.push(version);
 
-          // get back (all versions), & check
-          async.each(d._created, function(verCreated, cb2){
-            moduleSvc.getModuleWithVersion(d.family, d.name, verCreated, function(err, moduleWithVersion) {
-              should.not.exists(err);
-              should(moduleWithVersion).have.properties({
-                family: d.family,
-                name: d.name,
-                version_count: d._created.length,
-                latest_version: version,
-                version: verCreated,
-                author: d.author || 'ANONYMOUS'
-              });
-              cb2();
-            });
-          }, cb1);
+          should(mod).be.an.Object;
+
+          should(mod.getDataValue('family')).eql(d.family);
+          should(mod.getDataValue('name')).eql(d.name);
+          var latest = mod.getDataValue('latestVersion');
+          should(latest.getDataValue('version')).eql(version);
+
+          cb();
         });
-      }, cb);
+      }, function(err){
+        should.not.exists(err);
+
+        moduleSvc.getModule(d.family, d.name, true, function(err, mod){
+          should.not.exists(err);
+
+          should(mod).be.an.Object;
+          should(mod.getDataValue('family')).eql(d.family);
+          should(mod.getDataValue('name')).eql(d.name);
+          var latest = mod.getDataValue('latestVersion');
+          should(latest.getDataValue('version')).eql(d.versions[d.versions.length - 1]);
+
+          var versions = mod.getDataValue('versions');
+          should(versions).be.an.Array;
+          should(versions.length).eql(d.versions.length);
+          should(versions.map(function(ver){
+            should(ver).have.properties('version');
+            return ver.version;
+          }).sort()).eql(d.versions.sort());
+
+          callback();
+        });
+      });
     }, done);
   });
 
   it('can remove specific version', function(done){
-    async.eachSeries(initialModules, function(module, cb){
-      moduleSvc.removeVersion(module.family, module.name, module.version, function(err){
+    async.eachSeries(initialModules, function(mod, cb){
+      moduleSvc.removeVersion(mod.family, mod.name, mod.version, function(err){
         should.not.exists(err);
 
-        moduleSvc.getModuleWithVersion(module.family, module.name, module.version, function(err, moduleWithVersion){
+        moduleSvc.getModuleWithVersion(mod.family, mod.name, mod.version, function(err, moduleWithVersion){
           should.not.exists(err);
           if (moduleWithVersion) {
-            should(moduleWithVersion).is.Object;
-            should.not.exists(moduleWithVersion.version);
+            should(moduleWithVersion).be.Object;
+
+            var latest = moduleWithVersion.getDataValue('latestVersion');
+            if (latest) {
+              should(latest).have.properties('version');
+              should(latest.getDataValue('version')).not.eql(mod.version);
+            }
           }
 
           cb();
@@ -253,13 +264,13 @@ describe('moduleSvc', function(){
   });
 
   it('can remove module with all versions', function(done){
-    async.eachSeries(initialModules, function(module, cb){
-      moduleSvc.removeModule(module.family, module.name, function(err){
+    async.eachSeries(initialModules, function(mod, cb){
+      moduleSvc.removeModule(mod.family, mod.name, function(err){
         should.not.exists(err);
 
-        moduleSvc.getModule(module.family, module.name, function(err, module){
+        moduleSvc.getModule(mod.family, mod.name, function(err, ret){
           should.not.exists(err);
-          should.not.exists(module);
+          should.not.exists(ret);
 
           cb();
         });
@@ -271,27 +282,26 @@ describe('moduleSvc', function(){
     async.waterfall([
       moduleSvc.modules,
       function(modules, callback) {
-        async.each(modules, function(module, cb){
+        async.each(modules, function(mod, cb){
           var newFamily = util.randomString(),
               newName = util.randomString();
 
-          moduleSvc.updateModule({
-            family: newFamily,
-            name: newName,
-            id: module.id
-          }, function(err){
+          async.waterfall([
+            moduleSvc.updateModule.bind(null, {
+              family: newFamily,
+              name: newName
+            }, mod.id),
+            moduleSvc.getModule.bind(null, newFamily, newName)
+          ], function(err, ret){
             should.not.exists(err);
+            should(ret).have.property('id');
+            should(ret.getDataValue('id')).eql(mod.id);
 
-            moduleSvc.getModule(newFamily, newName, function(err, m){
-              should.not.exists(err);
-              should(m.id).eql(module.id);
-
-              cb();
-            })
-          })
+            cb();
+          });
         }, callback);
       }
     ], done);
-  });*/
+  });
 
 });

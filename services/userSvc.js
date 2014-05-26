@@ -5,8 +5,11 @@ var moment = require('moment');
 
 var log = require('../lib/logger');
 var util = require('../lib/util');
-var db = require('../lib/db');
 var conf = require('../conf');
+var modelProvider = require('./modelProvider');
+
+var User = modelProvider.model.bind(null, 'User');
+var Auth = modelProvider.model.bind(null, 'Auth');
 
 var listAll = exports.all = function(admin, active, callback) {
   var args = util.fillOptionalArgs(arguments, 3);
@@ -22,7 +25,9 @@ var listAll = exports.all = function(admin, active, callback) {
     qOpt.where.active = active;
   }
 
-  db.model('User').findAll(qOpt).complete(function(err, users) {
+  User()
+    .findAll(qOpt)
+    .done(function(err, users) {
     if (err) {
       log.warn('fail to fetch users: %j', err);
       callback(new Error('fail to fetch users'));
@@ -58,9 +63,10 @@ var create = exports.create = function(user, callback) {
       });
     },
     function(cb){
-      db.model('User').build(_.defaults({password: util.sha1Sum(user.password)}, user))
+      User()
+        .build(_.defaults({password: util.sha1Sum(user.password)}, user))
         .save()
-        .complete(function(err){
+        .done(function(err){
           if (err) {
             log.warn('fail to create user: %j', err);
             cb(new Error('fail to create user'));
@@ -75,7 +81,9 @@ var create = exports.create = function(user, callback) {
 };
 
 var getByName = exports.getByName = function(username, callback) {
-  db.model('User').find({where: {username: username}}).complete(function(err, user){
+  User()
+    .find({ where: { username: username } })
+    .done(function(err, user){
     if (err) {
       log.warn('fail to get user record: %j', err);
       callback(new Error('database not connected or table [user] not exists'));
@@ -88,9 +96,9 @@ var getByName = exports.getByName = function(username, callback) {
 exports.update = function(user, callback){
   var updated = user.password ? _.defaults({password: util.sha1Sum(user.password)}, user) : user;
   var where = user.id ? {id: user.id} : {username: user.username};
-  db.model('User')
+  User()
     .update(updated, where)
-    .complete(function(err){
+    .done(function(err){
     if (err) {
       log.warn('fail to update user[%s]: %j', user.username, err);
       callback(new Error('fail to update user'));
@@ -102,7 +110,9 @@ exports.update = function(user, callback){
 };
 
 var removeByName = exports.removeByName = function(username, callback) {
-  db.model('User').destroy({username: username}).complete(function(err){
+  User()
+    .destroy({ username: username })
+    .done(function(err){
     if (err) {
       log.warn('fail to remove %s: %j', username, err);
       callback(new Error('fail to remove ' + username));
@@ -116,24 +126,24 @@ var removeByName = exports.removeByName = function(username, callback) {
 exports.clear = function(callback) {
   var qChain = new QueryChainer;
 
-  ['Auth', 'User'].forEach(function(modelName){
-    qChain.add(db.model(modelName).destroy());
-  });
+  qChain.add(Auth().destroy());
+  qChain.add(User().destroy());
 
-  qChain.run().complete(function(err){
-    if (err) {
-      log.warn('fail to clear users & logins: %j', err);
-      callback(new Error('fail to clear users & logins'));
-    } else {
+  qChain
+    .run()
+    .success(function(){
       log.info('ALL users & logins cleared!');
       callback();
-    }
-  });
+    })
+    .error(function(err){
+      log.warn('fail to clear users & logins: %j', err);
+      callback(new Error('fail to clear users & logins'));
+    });
 };
 
 function saveAuth(auth, callback) {
   auth.setDataValue('tokenExpire', util.noMilliseconds(auth.tokenExpire));
-  auth.save().complete(function(err){
+  auth.save().done(function(err){
     if (err) {
       log.warn('fail to update auth record of %s: %j', auth.getUser().username, err);
       callback(new Error('fail to update login record'));
@@ -164,10 +174,12 @@ exports.login = function(username, password, admin, callback) {
       } else {
         log.info('user [%s] authorized!', username);
         var now = Date.now();
-        user.createAuth({
-          token: util.sha1Sum([user.username, now].join('-')),
-          tokenExpire: moment().add(conf.authDuration[0], conf.authDuration[1]).toDate()
-        }).complete(function(err, auth){
+        user
+          .createAuth({
+            token: util.sha1Sum([user.username, now].join('-')),
+            tokenExpire: moment().add(conf.authDuration[0], conf.authDuration[1]).toDate()
+          })
+          .done(function(err, auth){
           if (err) {
             log.warn('fail to create auth [user: %s]: %j', username, err);
             cb(new Error('fail to create auth'));
@@ -202,7 +214,9 @@ exports.latestAuth = function(username, valid, callback) {
         log.warn('fetch auths, but user [%s] not present', username);
         cb(new Error('fail to fetch auths'));
       } else {
-        user.getAuths({order: 'tokenExpire DESC', limit: 1}).complete(function(err, auths){
+        user
+          .getAuths({order: 'tokenExpire DESC', limit: 1})
+          .done(function(err, auths){
           if (err) {
             log.warn('fail to fetch auths of user [%s]: %j', username, err);
             return cb(new Error('fail to fetch auths'));
@@ -238,7 +252,9 @@ exports.auths = function(username, callback) {
         log.warn('fetch auths, but user [%s] not present', username);
         cb(new Error('fail to fetch auths'));
       } else {
-        user.getAuths({order: ['tokenExpire', 'DESC']}).complete(function(err, auths){
+        user
+          .getAuths({order: ['tokenExpire', 'DESC']})
+          .done(function(err, auths){
           if (err) {
             log.warn('fail to fetch auths of user [%s]: %j', username, err);
             cb(new Error('fail to fetch auths'));
